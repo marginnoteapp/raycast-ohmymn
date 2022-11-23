@@ -7,45 +7,20 @@ import {
   launchCommand,
   LaunchType,
   List,
-  LocalStorage,
   showToast,
   Toast
 } from "@raycast/api"
 import { randomUUID } from "crypto"
 import got from "got"
 import { useEffect, useState } from "react"
-import type { Preferences, LocalShortcut, SharedShortcut } from "./typings"
+import {
+  readLocalShortcuts,
+  readSharedShortcuts,
+  writeLocalShortcuts,
+  writeSharedShortcuts
+} from "./store"
+import type { LocalShortcut, Preferences, SharedShortcut } from "./typings"
 import { dateFormat } from "./utils"
-
-async function share(info: LocalShortcut) {
-  return (
-    (await got
-      // .post("http://127.0.0.1:3000/api", {
-      .post("https://ohmymn-shortcut.busiyi.world/api", {
-        json: {
-          action: "create",
-          lang,
-          info
-        }
-      })
-      .json()) as { status: "success" | "failed"; info: any }
-  )
-}
-
-async function update(info: LocalShortcut) {
-  return (
-    (await got
-      // .post("http://127.0.0.1:3000/api", {
-      .post("https://ohmymn-shortcut.busiyi.world/api", {
-        json: {
-          action: "update",
-          lang,
-          info
-        }
-      })
-      .json()) as { status: "success" | "failed"; info: any }
-  )
-}
 
 const preferences = getPreferenceValues<Preferences>()
 const username = preferences.username ? preferences.username : "anonymous"
@@ -56,21 +31,33 @@ export default function () {
   const [sharedShortcuts, setSharedShortcuts] = useState<LocalShortcut[]>([])
 
   async function fetchLocalShortcuts() {
-    const temp = await LocalStorage.getItem("local_shortcuts")
+    const temp = await readLocalShortcuts()
     if (temp) {
       setLocalShortcuts(JSON.parse(temp as string))
     }
   }
 
-  async function fetchSharedShortcuts() {
+  async function fetchSharedShortcuts(force = false) {
+    const temp = await readSharedShortcuts()
+    if (!force && temp) {
+      const { time, info } = JSON.parse(temp as string)
+      // 1 hour
+      if (Date.now() - time < 3600000) {
+        setSharedShortcuts(info)
+        return
+      }
+    }
+
     const toast = await showToast({
       style: Toast.Style.Animated,
-      title: "Fetching shortcuts from internet..."
+      title: "Fetching Shortcuts From Internet..."
     })
     try {
       const { status, info } = (await got
-        // .post("http://127.0.0.1:3000/api", {
         .post("https://ohmymn-shortcut.busiyi.world/api", {
+          timeout: {
+            request: 5000
+          },
           json: {
             action: "fetch",
             lang
@@ -88,13 +75,41 @@ export default function () {
       if (status === "success") {
         toast.style = Toast.Style.Success
         toast.title = "Successfully"
+        writeSharedShortcuts({ time: Date.now(), info })
         setSharedShortcuts(info)
       } else throw new Error(info)
     } catch (err: any) {
       toast.style = Toast.Style.Failure
-      toast.title = "Failed to fetch"
-      toast.message = err ?? ""
+      toast.title = "Failed to Fetch"
+      toast.message = err.message ?? ""
     }
+  }
+
+  async function share(info: LocalShortcut) {
+    return (
+      (await got
+        // .post("http://127.0.0.1:3000/api", {
+        .post("https://ohmymn-shortcut.busiyi.world/api", {
+          json: {
+            action: "create",
+            lang,
+            info
+          }
+        })
+        .json()) as { status: "success" | "failed"; info: any }
+    )
+  }
+
+  async function update(info: LocalShortcut) {
+    return (await got
+      .post("https://ohmymn-shortcut.busiyi.world/api", {
+        json: {
+          action: "update",
+          lang,
+          info
+        }
+      })
+      .json()) as { status: "success" | "failed"; info: any }
   }
 
   useEffect(() => {
@@ -103,8 +118,8 @@ export default function () {
   }, [])
 
   useEffect(() => {
-    LocalStorage.setItem("local_shortcuts", JSON.stringify(localShortcuts))
-  }, [localShortcuts, sharedShortcuts])
+    writeLocalShortcuts(localShortcuts)
+  }, [localShortcuts])
 
   return (
     <List isShowingDetail>
@@ -116,11 +131,13 @@ export default function () {
             const isShared = !!sharedShortcuts.find(
               k => k.uuid === shortcut.uuid
             )
+            const isReviewing = !isShared && shortcut.notionID
+            const status = isShared ? "Sharing" : isReviewing ? "Reviewing" : ""
             return (
               <List.Item
-                key={i}
+                key={shortcut.uuid + status}
                 title={shortcut.form.desc}
-                icon={isShared ? Icon.Cloud : undefined}
+                accessories={[{ text: status }]}
                 actions={
                   <ActionPanel>
                     <Action.CreateQuicklink
@@ -156,6 +173,7 @@ export default function () {
                             ...shortcut,
                             createdTime: Date.now(),
                             modifiedTime: Date.now(),
+                            notionID: "",
                             author: username,
                             uuid: randomUUID()
                           },
@@ -170,6 +188,10 @@ export default function () {
                       icon={Icon.Cloud}
                       shortcut={{ modifiers: ["cmd", "shift"], key: "u" }}
                       onAction={async () => {
+                        if (isReviewing) {
+                          showToast({ title: "This shortcut is under review" })
+                          return
+                        }
                         const toast = await showToast({
                           style: Toast.Style.Animated,
                           title: isShared ? "Updating..." : "Sharing..."
@@ -223,24 +245,26 @@ export default function () {
                         }
                       }}
                     ></Action>
-                    <Action
-                      title="Delete"
-                      icon={Icon.Trash}
-                      style={Action.Style.Destructive}
-                      shortcut={{ modifiers: ["ctrl"], key: "x" }}
-                      onAction={async () => {
-                        if (
-                          await confirmAlert({
-                            icon: { source: "logo.png" },
-                            title: "Delete This Shortcut?",
-                            message: "Warning: This action cannot be undone."
-                          })
-                        )
-                          setLocalShortcuts(
-                            localShortcuts.filter((_, index) => index !== i)
+                    <ActionPanel.Section>
+                      <Action
+                        title="Delete"
+                        icon={Icon.Trash}
+                        style={Action.Style.Destructive}
+                        shortcut={{ modifiers: ["ctrl"], key: "x" }}
+                        onAction={async () => {
+                          if (
+                            await confirmAlert({
+                              icon: { source: "logo.png" },
+                              title: "Delete This Shortcut?",
+                              message: "Warning: This action cannot be undone."
+                            })
                           )
-                      }}
-                    ></Action>
+                            setLocalShortcuts(
+                              localShortcuts.filter((_, index) => index !== i)
+                            )
+                        }}
+                      ></Action>
+                    </ActionPanel.Section>
                   </ActionPanel>
                 }
                 detail={<Detail shortcut={shortcut} />}
@@ -254,7 +278,7 @@ export default function () {
           .sort((m, n) => n.modifiedTime - m.modifiedTime)
           .map((shortcut, i) => (
             <List.Item
-              key={i}
+              key={shortcut.uuid}
               title={shortcut.form.desc}
               actions={
                 <ActionPanel>
@@ -292,6 +316,7 @@ export default function () {
                           createdTime: Date.now(),
                           modifiedTime: Date.now(),
                           download: false,
+                          notionID: "",
                           uuid: randomUUID()
                         },
                         ...localShortcuts
@@ -324,13 +349,10 @@ export default function () {
       </List.Section>
       <List.Section title="Shared by Others">
         {sharedShortcuts
-          .filter(
-            k => !localShortcuts.find(m => !m.download && m.uuid === k.uuid)
-          )
           .sort((m, n) => n.modifiedTime - m.modifiedTime)
-          .map((shortcut, i) => (
+          .map(shortcut => (
             <List.Item
-              key={i}
+              key={shortcut.uuid}
               title={shortcut.form.desc}
               actions={
                 <ActionPanel>
@@ -347,6 +369,22 @@ export default function () {
                           },
                           ...localShortcuts
                         ])
+                    }}
+                  ></Action>
+                  <Action.OpenInBrowser
+                    title="Open Notion URL"
+                    shortcut={{ modifiers: ["cmd", "shift"], key: "o" }}
+                    url={
+                      "https://busiyi.notion.site/" +
+                      shortcut.notionID?.replace(/-/g, "")
+                    }
+                  ></Action.OpenInBrowser>
+                  <Action
+                    title="Refresh Shortcuts"
+                    icon={Icon.ArrowClockwise}
+                    shortcut={{ modifiers: ["cmd", "shift"], key: "r" }}
+                    onAction={async () => {
+                      await fetchSharedShortcuts(true)
                     }}
                   ></Action>
                 </ActionPanel>

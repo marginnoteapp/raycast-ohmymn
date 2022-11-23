@@ -1,5 +1,11 @@
-import { getPreferenceValues } from "@raycast/api"
-import { CustomShortcut, OhMyMNAction, Preferences } from "./typings"
+import { getPreferenceValues, LocalStorage } from "@raycast/api"
+import {
+  CustomShortcut,
+  LocalShortcut,
+  OhMyMNAction,
+  Preferences,
+  SharedShortcut
+} from "./typings"
 
 const { actionInChinese } = getPreferenceValues<Preferences>()
 export const cardActionsEN = [
@@ -276,6 +282,7 @@ export const textActionsEN = [
     option: ["Confirm"]
   }
 ]
+
 export const cardActions = (
   actionInChinese
     ? [
@@ -540,13 +547,46 @@ export const textActions = (
 ) as OhMyMNAction[]
 
 export const defaultRequiredCardActions = Array.from({ length: 5 }).fill({
-  key: "false_manageProfile_0_配置管理 / 读取配置_MagicAction For Card",
+  key: actionInChinese
+    ? "false_manageProfile_0_配置管理 / 读取配置_MagicAction For Card"
+    : "false_manageProfile_0_Manage Profile / Read Profile_MagicAction For Card",
   input: "",
   desc: ""
 }) as CustomShortcut.Action[]
 
 export const defaultRequiredTextActions = Array.from({ length: 5 }).fill({
-  key: "false_copyText_0_复制选中文字 / 确定_MagicAction For Text",
+  key: actionInChinese
+    ? "false_copyText_0_复制选中文字 / 确定_MagicAction For Text"
+    : "false_copyText_0_Copy Selected Text / Confirm_MagicAction For Text",
   input: "",
   desc: ""
 }) as CustomShortcut.Action[]
+
+export async function writeLocalShortcuts(shortcuts: LocalShortcut[]) {
+  await LocalStorage.setItem(
+    actionInChinese ? "local_shortcuts" : "local_shortcuts_en",
+    JSON.stringify(shortcuts)
+  )
+}
+
+export async function readLocalShortcuts() {
+  return await LocalStorage.getItem(
+    actionInChinese ? "local_shortcuts" : "local_shortcuts_en"
+  )
+}
+
+export async function writeSharedShortcuts(data: {
+  time: number
+  info: SharedShortcut[]
+}) {
+  await LocalStorage.setItem(
+    actionInChinese ? "shared_shortcuts" : "shared_shortcuts_en",
+    JSON.stringify(data)
+  )
+}
+
+export async function readSharedShortcuts() {
+  return await LocalStorage.getItem(
+    actionInChinese ? "shared_shortcuts" : "shared_shortcuts_en"
+  )
+}

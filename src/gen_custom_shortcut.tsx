@@ -1,34 +1,36 @@
 import {
-  ActionPanel,
   Action,
-  Icon,
-  Form,
-  open,
+  ActionPanel,
   Clipboard,
-  showHUD,
   confirmAlert,
-  LocalStorage,
+  environment,
+  Form,
+  getPreferenceValues,
+  Icon,
   launchCommand,
   LaunchType,
-  getPreferenceValues
+  open,
+  showHUD
 } from "@raycast/api"
-import { useEffect, useState, useRef } from "react"
+import { randomUUID } from "crypto"
+import { useEffect, useRef, useState } from "react"
 import {
   cardActions,
-  textActions,
   defaultRequiredCardActions,
-  defaultRequiredTextActions
+  defaultRequiredTextActions,
+  readLocalShortcuts,
+  textActions,
+  writeLocalShortcuts
 } from "./store"
 import {
-  Preferences,
   CustomShortcut,
   LocalShortcut,
-  OhMyMNAction
+  OhMyMNAction,
+  Preferences
 } from "./typings"
-import { environment } from "@raycast/api"
-import { randomUUID } from "crypto"
 
-const username = getPreferenceValues<Preferences>().username ?? "anonymous"
+const preferences = getPreferenceValues<Preferences>()
+const username = preferences.username ?? "anonymous"
 
 function popupEnptyError(value: string) {
   if (value === "") return "Can not be empty"
@@ -102,7 +104,9 @@ export default function ({
       actionNames.push(name)
       if (!moduleName.startsWith("Magic")) moduleNames.add(moduleName)
       if (need_input === "true") {
-        const input = form[`action_input_${i}` as keyof CustomShortcut.Form]!
+        const input = form[
+          `action_input_${i}` as keyof CustomShortcut.Form
+        ]!.replace(/\n/g, "\\n")
         const desc =
           form[`action_input_desc_${i}` as keyof CustomShortcut.Form]!
         detailItems.push({
@@ -148,34 +152,44 @@ export default function ({
     }
 
     function genDetail() {
+      const { actionInChinese } = preferences
+      const _option = actionInChinese ? "选项" : "Option"
+      const _input = actionInChinese ? "输入" : "Input"
+      const _desc = actionInChinese ? "描述" : "Description"
       return detailItems
         .map((k, i) => {
           const [action, option] = k.actionName.split(" / ")
           if (k.input) {
             if (k.desc) {
-              return `**${i + 1}、${action}**
+              return `## ${desc}
 
-**选项**：${option}
+**${i + 1}、${action}**
 
-**输入**：
+**${_option}**：${option}
+
+**${_input}**：
 \`\`\`text
 ${k.input}
 \`\`\`
-**描述**：${k.desc}`
+**${_desc}**：${k.desc}`
             } else {
-              return `**${i + 1}、${action}**
+              return `## ${desc}
 
-**选项**: ${option}
+**${i + 1}、${action}**
 
-**输入**:
+**${_option}**: ${option}
+
+**${_input}**:
 \`\`\`text
 ${k.input}
 \`\`\``
             }
           } else {
-            return `**${i + 1}、${action}**
+            return `## ${desc}
 
-**选项**：${option}`
+**${i + 1}、${action}**
+
+**${_option}**：${option}`
           }
         })
         .join("\n\n")
@@ -200,7 +214,7 @@ ${k.input}
     detail: string,
     moduleNames: string[]
   ) {
-    const temp = await LocalStorage.getItem("local_shortcuts")
+    const temp = await readLocalShortcuts()
     if (temp) {
       const shortcuts = JSON.parse(temp as string) as LocalShortcut[]
       const existIndex = shortcuts.findIndex(k => k.uuid === uuid)
@@ -225,7 +239,7 @@ ${k.input}
           modifiedTime: Date.now()
         }
       }
-      await LocalStorage.setItem("local_shortcuts", JSON.stringify(shortcuts))
+      await writeLocalShortcuts(shortcuts)
     } else {
       const shortcuts = [
         {
@@ -239,7 +253,7 @@ ${k.input}
           uuid
         }
       ] as LocalShortcut[]
-      await LocalStorage.setItem("local_shortcuts", JSON.stringify(shortcuts))
+      await writeLocalShortcuts(shortcuts)
     }
   }
 
